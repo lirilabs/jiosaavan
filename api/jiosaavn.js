@@ -5,27 +5,10 @@ export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json");
 
   try {
-    const { q, p, n } = req.query;
-
-    // Strict: NO STATIC VALUES — all required
-    if (!q) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required parameter: q (search query)"
-      });
-    }
-    if (!p) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required parameter: p (page number)"
-      });
-    }
-    if (!n) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required parameter: n (results per page)"
-      });
-    }
+    // If values missing → auto defaults
+    const q = req.query.q ?? "";
+    const p = req.query.p ?? 1;
+    const n = req.query.n ?? 20;
 
     const url = `https://www.jiosaavn.com/api.php?p=${p}&q=${encodeURIComponent(
       q
@@ -33,15 +16,14 @@ export default async function handler(req, res) {
 
     const response = await axios.get(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0",
         Accept: "application/json"
       }
     });
 
     let data = response.data;
 
-    // Fix JioSaavn string response
+    // Sometimes returned as string → convert to JSON
     if (typeof data === "string") {
       data = JSON.parse(data.replace(/^[^\{]+/, ""));
     }
@@ -52,7 +34,7 @@ export default async function handler(req, res) {
       page: Number(p),
       perPage: Number(n),
       total: data.total || 0,
-      count: data.results?.length || 0,
+      count: (data.results || []).length,
       artists: data.results || []
     });
   } catch (err) {
