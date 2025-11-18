@@ -7,7 +7,6 @@ export default async function handler(req, res) {
   try {
     const { l = "", p = 1 } = req.query;
 
-    // Language filter mapped to search keyword
     const langMap = {
       tamil: "tamil singer",
       hindi: "hindi singer",
@@ -17,36 +16,35 @@ export default async function handler(req, res) {
       english: "english singer"
     };
 
-    // Search text based on language
     const q = langMap[l.toLowerCase()] || "artidt";
-
-    // FIXED: always 50 per page
-    const n = 50;
+    const n = 50; // always 50 artists per page
 
     const url =
       `https://www.jiosaavn.com/api.php?p=${p}&q=${encodeURIComponent(q)}` +
       `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=${n}` +
       `&__call=search.getArtistResults`;
 
-    // Fetch raw text
     const raw = await axios.get(url, { responseType: "text" });
 
     let data = raw.data.replace(/^[^{]+/, "");
     const cleanJSON = JSON.parse(data);
 
-    return res.status(200).send(
-      JSON.stringify(
-        {
-          page: Number(p),
-          perPage: n,
-          language: l || "default",
-          total: cleanJSON.total,
-          artists: cleanJSON.results || []
-        },
-        null,
-        2
-      )
-    );
+    const artists = cleanJSON.results || [];
+
+    // CLEAN ONLY name, role, image
+    const filteredArtists = artists.map((artist) => ({
+      name: artist.name,
+      role: artist.role,
+      image: artist.image
+    }));
+
+    return res.status(200).json({
+      page: Number(p),
+      perPage: n,
+      language: l || "default",
+      total: cleanJSON.total,
+      artists: filteredArtists
+    });
 
   } catch (error) {
     return res.status(500).json({
