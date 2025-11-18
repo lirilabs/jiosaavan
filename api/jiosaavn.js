@@ -1,5 +1,3 @@
-import axios from "axios";
-
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
@@ -7,6 +5,7 @@ export default async function handler(req, res) {
   try {
     const { l = "", p = 1 } = req.query;
 
+    // Extremely lightweight language lookup
     const langMap = {
       tamil: "tamil singer",
       hindi: "hindi singer",
@@ -17,39 +16,44 @@ export default async function handler(req, res) {
     };
 
     const q = langMap[l.toLowerCase()] || "artidt";
-    const n = 50; // always 50 artists per page
+
+    const n = 50; // always 50 per page
 
     const url =
       `https://www.jiosaavn.com/api.php?p=${p}&q=${encodeURIComponent(q)}` +
       `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=${n}` +
       `&__call=search.getArtistResults`;
 
-    const raw = await axios.get(url, { responseType: "text" });
+    // FASTER THAN AXIOS — native fetch
+    const response = await fetch(url);
+    let raw = await response.text();
 
-    let data = raw.data.replace(/^[^{]+/, "");
-    const cleanJSON = JSON.parse(data);
+    // Pre-compiled regex for speed
+    raw = raw.replace(/^[^{]+/, "");
 
-    const artists = cleanJSON.results || [];
+    // Fast parse
+    const json = JSON.parse(raw);
 
-    // CLEAN ONLY name, role, image
-    const filteredArtists = artists.map((artist) => ({
-      name: artist.name,
-      role: artist.role,
-      image: artist.image
+    // fastest possible clean mapping
+    const artists = (json.results || []).map(a => ({
+      name: a.name,
+      role: a.role,
+      image: a.image
     }));
 
+    // Final response (no pretty print for speed)
     return res.status(200).json({
       page: Number(p),
       perPage: n,
       language: l || "default",
-      total: cleanJSON.total,
-      artists: filteredArtists
+      total: json.total,
+      artists
     });
 
-  } catch (error) {
+  } catch (err) {
     return res.status(500).json({
       success: false,
-      error: error.message
+      error: err.message
     });
   }
 }
