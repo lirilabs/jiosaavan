@@ -1,45 +1,47 @@
 import axios from "axios";
 
 export default async function handler(req, res) {
-  const { q = "arijit" } = req.query;
+  res.setHeader("Access-Control-Allow-Origin", "*");
 
   try {
-    const response = await axios.get(
-      "https://www.jiosaavn.com/api.php",
-      {
-        params: {
-          p: 1,
-          q,
-          _format: "json",
-          _marker: 0,
-          api_version: 4,
-          ctx: "wap6dot0",
-          n: 20,
-          __call: "search.getArtistResults"
-        },
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-          "Accept": "application/json, text/plain, */*",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Referer": "https://www.jiosaavn.com/",
-          // Put YOUR cookie here for stable access
-          "Cookie": process.env.JIOSAAVN_COOKIE
-        }
+    const {
+      q = "arijit",
+      p = 1,
+      n = 20
+    } = req.query;
+
+    const url = `https://www.jiosaavn.com/api.php?p=${p}&q=${encodeURIComponent(
+      q
+    )}&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=${n}&__call=search.getArtistResults`;
+
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        Accept: "application/json"
       }
-    );
+    });
 
-    // Clean JioSaavn JSON (removes "<!---->" etc.)
-    const cleanJson = JSON.parse(
-      response.data.replace(/^\s*<!.*?>\s*/g, "")
-    );
+    let data = response.data;
 
-    res.status(200).json(cleanJson);
+    // JioSaavn returns string JSON — need fix
+    if (typeof data === "string") {
+      data = JSON.parse(data.replace(/^[^\{]+/, ""));
+    }
 
+    return res.status(200).json({
+      success: true,
+      page: Number(p),
+      query: q,
+      count: data?.results?.length || 0,
+      total: data?.total || 0,
+      data
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      error: true,
-      message: err.response?.data || err.message
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching data",
+      error: err.toString()
     });
   }
 }
