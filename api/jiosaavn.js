@@ -1,5 +1,3 @@
-import axios from "axios";
-
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
@@ -7,6 +5,7 @@ export default async function handler(req, res) {
   try {
     const { l = "", p = 1 } = req.query;
 
+    // Strict language lookup – no fallback
     const langMap = {
       tamil: "tamil singer",
       hindi: "hindi singer",
@@ -16,40 +15,48 @@ export default async function handler(req, res) {
       english: "english singer"
     };
 
-    const q = langMap[l.toLowerCase()] || "artidt";
-    const n = 50; // always 50 artists per page
+    const key = l.toLowerCase();
+
+    // If language not available, stop immediately
+    if (!langMap[key]) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid language"
+      });
+    }
+
+    const q = langMap[key];
+    const n = 50;
 
     const url =
       `https://www.jiosaavn.com/api.php?p=${p}&q=${encodeURIComponent(q)}` +
       `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=${n}` +
       `&__call=search.getArtistResults`;
 
-    const raw = await axios.get(url, { responseType: "text" });
+    const response = await fetch(url);
+    let raw = await response.text();
 
-    let data = raw.data.replace(/^[^{]+/, "");
-    const cleanJSON = JSON.parse(data);
+    raw = raw.replace(/^[^{]+/, "");
+    const json = JSON.parse(raw);
 
-    const artists = cleanJSON.results || [];
-
-    // CLEAN ONLY name, role, image
-    const filteredArtists = artists.map((artist) => ({
-      name: artist.name,
-      role: artist.role,
-      image: artist.image
+    const artists = (json.results || []).map(a => ({
+      name: a.name,
+      role: a.role,
+      image: a.image
     }));
 
     return res.status(200).json({
       page: Number(p),
       perPage: n,
-      language: l || "default",
-      total: cleanJSON.total,
-      artists: filteredArtists
+      language: key,
+      total: json.total,
+      artists
     });
 
-  } catch (error) {
+  } catch (err) {
     return res.status(500).json({
       success: false,
-      error: error.message
+      error: err.message
     });
   }
 }
