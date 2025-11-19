@@ -1,19 +1,17 @@
 import axios from "axios";
 
 // In-memory cache with TTL (Time To Live)
-// NOTE: In serverless, this only persists during "warm" container lifecycle
-// For persistent cache, use Redis, Vercel KV, or Upstash
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// Language mapping with optimized lookup
+// Language mapping - removed "singer" suffix for better results
 const langMap = {
-  tamil: "tamil singer",
-  hindi: "hindi singer",
-  telugu: "telugu singer",
-  malayalam: "malayalam singer",
-  kannada: "kannada singer",
-  english: "english singer"
+  tamil: "tamil",
+  hindi: "hindi",
+  telugu: "telugu",
+  malayalam: "malayalam",
+  kannada: "kannada",
+  english: "english"
 };
 
 // Reusable axios instance with optimizations
@@ -41,7 +39,6 @@ async function prefetchNextPage(query, lang, currentPage) {
       `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=50` +
       `&__call=search.getArtistResults`;
     
-    // Non-blocking prefetch
     apiClient.get(url, { responseType: "text" })
       .then(raw => {
         const startIndex = raw.data.indexOf("{");
@@ -52,7 +49,7 @@ async function prefetchNextPage(query, lang, currentPage) {
           timestamp: Date.now()
         });
       })
-      .catch(() => {}); // Silent fail for prefetch
+      .catch(() => {});
   }
 }
 
@@ -66,14 +63,39 @@ function cleanupCache() {
   }
 }
 
+// Filter artists by language (additional client-side filtering)
+function filterByLanguage(artists, targetLang) {
+  if (!targetLang || targetLang === "default") return artists;
+  
+  const langKeywords = {
+    tamil: ["tamil"],
+    hindi: ["hindi", "bollywood"],
+    telugu: ["telugu", "tollywood"],
+    malayalam: ["malayalam", "mollywood"],
+    kannada: ["kannada", "sandalwood"],
+    english: ["english", "international"]
+  };
+  
+  const keywords = langKeywords[targetLang.toLowerCase()] || [];
+  
+  return artists.filter(artist => {
+    const role = (artist.role || "").toLowerCase();
+    const name = (artist.name || "").toLowerCase();
+    
+    // Check if artist role or name contains target language keywords
+    return keywords.some(keyword => 
+      role.includes(keyword) || name.includes(keyword)
+    );
+  });
+}
+
 export default async function handler(req, res) {
-  // CORS headers - allow all origins
+  // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Content-Type", "application/json");
   
-  // Handle preflight
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -83,39 +105,47 @@ export default async function handler(req, res) {
     const lang = l.toLowerCase();
     const page = Number(p);
     
-    // Build search query based on parameters
+    // Build search query
     let searchQuery;
     
     if (name) {
-      // If artist name is provided, search with name + language
+      // Search by artist name
       const langSuffix = lang && langMap[lang] ? ` ${langMap[lang]}` : "";
       searchQuery = `${name}${langSuffix}`;
+    } else if (lang && langMap[lang]) {
+      // Search by language - use more specific query
+      searchQuery = `${langMap[lang]} artist songs music`;
     } else {
-      // Default behavior: search by language only
-      searchQuery = langMap[lang] || "artist";
+      // Default fallback
+      searchQuery = "popular artist";
     }
     
     const cacheKey = getCacheKey(searchQuery, lang || "default", page);
 
-    // Check cache first (AI-like optimization: pattern recognition)
+    // Check cache
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      const artists = cached.data.results || [];
+      let artists = cached.data.results || [];
+      
+      // Apply language filter
+      if (lang && !name) {
+        artists = filterByLanguage(artists, lang);
+      }
+      
       const filteredArtists = artists.map(({ name, role, image }) => ({
         name,
         role,
         image
       }));
 
-      // Trigger prefetch in background
       setImmediate(() => prefetchNextPage(searchQuery, lang || "default", page));
 
       return res.status(200).json({
         page,
         perPage: 50,
         language: l || "default",
-        searchQuery: name || "all",
-        total: cached.data.total,
+        searchQuery: name || searchQuery,
+        total: filteredArtists.length,
         artists: filteredArtists,
         cached: true
       });
@@ -129,28 +159,28 @@ export default async function handler(req, res) {
 
     const raw = await apiClient.get(url, { responseType: "text" });
     
-    // Optimized JSON parsing (remove prefix)
     const startIndex = raw.data.indexOf("{");
     const data = startIndex > 0 ? raw.data.slice(startIndex) : raw.data;
     const cleanJSON = JSON.parse(data);
 
-    // Cache the result
     cache.set(cacheKey, {
       data: cleanJSON,
       timestamp: Date.now()
     });
 
-    // Periodic cache cleanup
     if (Math.random() < 0.1) {
       setImmediate(cleanupCache);
     }
 
-    // Trigger predictive prefetch
     setImmediate(() => prefetchNextPage(searchQuery, lang || "default", page));
 
-    const artists = cleanJSON.results || [];
+    let artists = cleanJSON.results || [];
     
-    // Optimized mapping with destructuring
+    // Apply language filter when searching by language only
+    if (lang && !name) {
+      artists = filterByLanguage(artists, lang);
+    }
+    
     const filteredArtists = artists.map(({ name, role, image }) => ({
       name,
       role,
@@ -161,8 +191,8 @@ export default async function handler(req, res) {
       page,
       perPage: 50,
       language: l || "default",
-      searchQuery: name || "all",
-      total: cleanJSON.total,
+      searchQuery: name || searchQuery,
+      total: filteredArtists.length,
       artists: filteredArtists,
       cached: false
     });
