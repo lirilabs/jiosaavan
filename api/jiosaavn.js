@@ -4,14 +4,45 @@ import axios from "axios";
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// Language-specific popular artist names to get relevant results
-const langSearchQueries = {
-  tamil: "AR Rahman Anirudh Yuvan Shankar Raja Devi Sri Prasad Harris Jayaraj",
-  hindi: "Arijit Singh Shreya Ghoshal Sonu Nigam Atif Aslam Neha Kakkar Badshah",
-  telugu: "Devi Sri Prasad Thaman S Anirudh MM Keeravani Sid Sriram",
-  malayalam: "Vineeth Sreenivasan KS Chithra Vidyasagar Gopi Sundar MG Sreekumar",
-  kannada: "Armaan Malik Sanjith Hegde Vijay Prakash Shreya Ghoshal Raghu Dixit",
-  english: "Ed Sheeran Taylor Swift Justin Bieber Ariana Grande The Weeknd"
+// Known artists by language (for filtering)
+const artistsByLanguage = {
+  tamil: [
+    "S. P. Balasubrahmanyam", "Anirudh Ravichander", "A.R. Rahman", "Yuvan Shankar Raja",
+    "Harris Jayaraj", "Ilaiyaraaja", "Devi Sri Prasad", "Sid Sriram", "Vijay Antony",
+    "G.V. Prakash Kumar", "D. Imman", "Santhosh Narayanan", "Hiphop Tamizha",
+    "Chinmayi", "Shreya Ghoshal", "Harini", "Anuradha Sriram", "Shakthisree Gopalan",
+    "K. S. Chithra", "S. Janaki", "P. Susheela", "T. M. Soundararajan", "K. J. Yesudas",
+    "Unnikrishnan", "Hariharan", "SPB Charan", "Karthik", "Vijay Yesudas", "Haricharan",
+    "Benny Dayal", "Andrea Jeremiah", "Dhee", "Jonita Gandhi"
+  ],
+  hindi: [
+    "Arijit Singh", "Shreya Ghoshal", "Sonu Nigam", "Atif Aslam", "Neha Kakkar",
+    "Badshah", "Jubin Nautiyal", "Armaan Malik", "Vishal Mishra", "B Praak",
+    "Mohit Chauhan", "Sunidhi Chauhan", "Alka Yagnik", "Kumar Sanu", "Udit Narayan",
+    "Anuradha Paudwal", "Kavita Krishnamurthy", "Shilpa Rao", "Payal Dev",
+    "Amitabh Bhattacharya", "Yo Yo Honey Singh", "Guru Randhawa", "Diljit Dosanjh",
+    "Darshan Raval", "Tony Kakkar", "Tulsi Kumar", "Palak Muchhal", "Shaan"
+  ],
+  telugu: [
+    "Devi Sri Prasad", "Thaman S", "S. P. Balasubrahmanyam", "Sid Sriram",
+    "MM Keeravani", "Anirudh Ravichander", "Mani Sharma", "R. P. Patnaik",
+    "Ghibran", "S. Thaman", "Ramajogayya Sastry", "Chinmayi", "Shreya Ghoshal",
+    "Sunitha", "Hemachandra", "Mangli", "Rahul Sipligunj", "Kaala Bhairava"
+  ],
+  malayalam: [
+    "Vineeth Sreenivasan", "K. S. Chithra", "Vidyasagar", "Gopi Sundar",
+    "M. G. Sreekumar", "K. J. Yesudas", "S. Janaki", "Sujatha Mohan",
+    "Hariharan", "Najim Arshad", "Haricharan", "Shreya Ghoshal", "Vijay Yesudas"
+  ],
+  kannada: [
+    "Armaan Malik", "Sanjith Hegde", "Vijay Prakash", "Shreya Ghoshal",
+    "Raghu Dixit", "Puneeth Rajkumar", "Rajesh Krishnan", "V. Harikrishna",
+    "Arjun Janya", "Chandan Shetty", "Vasuki Vaibhav"
+  ],
+  english: [
+    "Ed Sheeran", "Taylor Swift", "Justin Bieber", "Ariana Grande", "The Weeknd",
+    "DJ Snake", "Sean Paul", "Eminem", "Rihanna", "Drake", "Post Malone"
+  ]
 };
 
 // Reusable axios instance
@@ -23,34 +54,22 @@ const apiClient = axios.create({
   }
 });
 
+// Check if artist belongs to a language
+function isArtistInLanguage(artistName, language) {
+  if (!language || !artistsByLanguage[language]) return true;
+  
+  const langArtists = artistsByLanguage[language];
+  const normalizedName = artistName.toLowerCase().trim();
+  
+  return langArtists.some(knownArtist => {
+    const normalizedKnown = knownArtist.toLowerCase().trim();
+    return normalizedName.includes(normalizedKnown) || normalizedKnown.includes(normalizedName);
+  });
+}
+
 // Cache key generator
 function getCacheKey(query, lang, page) {
   return `${query}_${lang}_${page}`;
-}
-
-// Predictive prefetching for next page
-async function prefetchNextPage(query, lang, currentPage) {
-  const nextPage = currentPage + 1;
-  const cacheKey = getCacheKey(query, lang, nextPage);
-  
-  if (!cache.has(cacheKey)) {
-    const url =
-      `https://www.jiosaavn.com/api.php?p=${nextPage}&q=${encodeURIComponent(query)}` +
-      `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=50` +
-      `&__call=search.getArtistResults`;
-    
-    apiClient.get(url, { responseType: "text" })
-      .then(raw => {
-        const startIndex = raw.data.indexOf("{");
-        const data = startIndex > 0 ? raw.data.slice(startIndex) : raw.data;
-        const cleanJSON = JSON.parse(data);
-        cache.set(cacheKey, {
-          data: cleanJSON,
-          timestamp: Date.now()
-        });
-      })
-      .catch(() => {});
-  }
 }
 
 // Cleanup expired cache entries
@@ -61,44 +80,6 @@ function cleanupCache() {
       cache.delete(key);
     }
   }
-}
-
-// Helper to fetch and merge results from multiple queries
-async function fetchMultipleQueries(queries, page) {
-  const promises = queries.map(query => {
-    const url =
-      `https://www.jiosaavn.com/api.php?p=${page}&q=${encodeURIComponent(query)}` +
-      `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=20` +
-      `&__call=search.getArtistResults`;
-    
-    return apiClient.get(url, { responseType: "text" })
-      .then(raw => {
-        const startIndex = raw.data.indexOf("{");
-        const data = startIndex > 0 ? raw.data.slice(startIndex) : raw.data;
-        return JSON.parse(data);
-      })
-      .catch(() => ({ results: [] }));
-  });
-
-  const results = await Promise.all(promises);
-  
-  // Merge and deduplicate artists by name
-  const artistMap = new Map();
-  let total = 0;
-  
-  results.forEach(result => {
-    total = Math.max(total, result.total || 0);
-    (result.results || []).forEach(artist => {
-      if (!artistMap.has(artist.name)) {
-        artistMap.set(artist.name, artist);
-      }
-    });
-  });
-
-  return {
-    results: Array.from(artistMap.values()),
-    total
-  };
 }
 
 export default async function handler(req, res) {
@@ -117,73 +98,58 @@ export default async function handler(req, res) {
     const lang = l.toLowerCase();
     const page = Number(p);
     
-    // Build search query
-    let searchQuery;
-    let useMultiQuery = false;
-    
-    if (name) {
-      // If artist name is provided, search for that specific name
-      searchQuery = name;
-    } else if (lang && langSearchQueries[lang]) {
-      // For language searches, use language-specific artist names
-      searchQuery = langSearchQueries[lang];
-      useMultiQuery = true; // We'll search multiple artists for better results
-    } else {
-      // Default fallback
-      searchQuery = "artist";
-    }
-    
-    const cacheKey = getCacheKey(searchQuery, lang || "default", page);
+    // Simple search query
+    const searchQuery = name || "artist";
+    const cacheKey = getCacheKey(searchQuery, lang, page);
 
     // Check cache first
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      const artists = cached.data.results || [];
-      const filteredArtists = artists.slice(0, 50).map(({ name, role, image }) => ({
-        name,
-        role,
-        image
-      }));
-
-      // Trigger prefetch in background
-      setImmediate(() => prefetchNextPage(searchQuery, lang || "default", page));
-
-      return res.status(200).json({
-        page,
-        perPage: 50,
-        language: l || "default",
-        searchQuery: name || lang || "default",
-        total: cached.data.total,
-        artists: filteredArtists,
-        cached: true
-      });
+      return res.status(200).json(cached.data);
     }
 
-    let cleanJSON;
+    // Fetch from JioSaavn API
+    const url =
+      `https://www.jiosaavn.com/api.php?p=${page}&q=${encodeURIComponent(searchQuery)}` +
+      `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=50` +
+      `&__call=search.getArtistResults`;
 
-    if (useMultiQuery && !name) {
-      // For language queries, search multiple artists and merge results
-      const artistNames = searchQuery.split(' ');
-      const queries = artistNames.slice(0, 4); // Limit to 4 queries to avoid rate limits
-      cleanJSON = await fetchMultipleQueries(queries, page);
-    } else {
-      // Single query for specific artist names
-      const url =
-        `https://www.jiosaavn.com/api.php?p=${page}&q=${encodeURIComponent(searchQuery)}` +
-        `&_format=json&_marker=0&api_version=4&ctx=wap6dot0&n=50` +
-        `&__call=search.getArtistResults`;
+    const raw = await apiClient.get(url, { responseType: "text" });
+    
+    // Parse JSON (remove any prefix)
+    const startIndex = raw.data.indexOf("{");
+    const data = startIndex > 0 ? raw.data.slice(startIndex) : raw.data;
+    const apiResponse = JSON.parse(data);
 
-      const raw = await apiClient.get(url, { responseType: "text" });
-      
-      // Optimized JSON parsing (remove prefix)
-      const startIndex = raw.data.indexOf("{");
-      const data = startIndex > 0 ? raw.data.slice(startIndex) : raw.data;
-      cleanJSON = JSON.parse(data);
+    let artists = apiResponse.results || [];
+    
+    // Filter by language if specified
+    if (lang && artistsByLanguage[lang]) {
+      artists = artists.filter(artist => isArtistInLanguage(artist.name, lang));
     }
+
+    // Map to clean response
+    const filteredArtists = artists.map(({ name, role, image, id, perma_url }) => ({
+      id,
+      name,
+      role,
+      image,
+      url: perma_url
+    }));
+
+    const responseData = {
+      page,
+      perPage: 50,
+      language: lang || "all",
+      searchQuery: name || "artist",
+      total: lang ? filteredArtists.length : apiResponse.total,
+      artists: filteredArtists,
+      cached: false
+    };
 
     // Cache the result
     cache.set(cacheKey, {
-      data: cleanJSON,
+      data: responseData,
       timestamp: Date.now()
     });
 
@@ -192,29 +158,7 @@ export default async function handler(req, res) {
       setImmediate(cleanupCache);
     }
 
-    // Trigger predictive prefetch
-    if (!useMultiQuery) {
-      setImmediate(() => prefetchNextPage(searchQuery, lang || "default", page));
-    }
-
-    const artists = cleanJSON.results || [];
-    
-    // Optimized mapping with destructuring, limit to 50 results
-    const filteredArtists = artists.slice(0, 50).map(({ name, role, image }) => ({
-      name,
-      role,
-      image
-    }));
-
-    return res.status(200).json({
-      page,
-      perPage: 50,
-      language: l || "default",
-      searchQuery: name || lang || "default",
-      total: cleanJSON.total || artists.length,
-      artists: filteredArtists,
-      cached: false
-    });
+    return res.status(200).json(responseData);
 
   } catch (error) {
     console.error('API Error:', error);
