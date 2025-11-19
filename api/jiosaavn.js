@@ -5,7 +5,6 @@ export default async function handler(req, res) {
   try {
     const { l = "", p = 1 } = req.query;
 
-    // Strict language lookup – no fallback
     const langMap = {
       tamil: "tamil singer",
       hindi: "hindi singer",
@@ -17,7 +16,6 @@ export default async function handler(req, res) {
 
     const key = l.toLowerCase();
 
-    // If language not available, stop immediately
     if (!langMap[key]) {
       return res.status(400).json({
         success: false,
@@ -36,8 +34,26 @@ export default async function handler(req, res) {
     const response = await fetch(url);
     let raw = await response.text();
 
-    raw = raw.replace(/^[^{]+/, "");
-    const json = JSON.parse(raw);
+    // FIX: force proper JSON parsing
+    const firstBrace = raw.indexOf("{");
+    if (firstBrace === -1) {
+      return res.status(500).json({
+        success: false,
+        error: "Invalid API response from JioSaavn"
+      });
+    }
+
+    raw = raw.slice(firstBrace);
+
+    let json;
+    try {
+      json = JSON.parse(raw);
+    } catch (e) {
+      return res.status(500).json({
+        success: false,
+        error: "Failed to parse JioSaavn JSON"
+      });
+    }
 
     const artists = (json.results || []).map(a => ({
       name: a.name,
