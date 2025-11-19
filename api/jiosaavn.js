@@ -1,20 +1,20 @@
 import axios from "axios";
 
-// In-memory cache with TTL (Time To Live)
+// In-memory cache with TTL
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// Language mapping - removed "singer" suffix for better results
-const langMap = {
-  tamil: "tamil",
-  hindi: "hindi",
-  telugu: "telugu",
-  malayalam: "malayalam",
-  kannada: "kannada",
-  english: "english"
+// Better search queries that work with JioSaavn's search
+const langSearchQueries = {
+  tamil: "songs",      // Generic search returns Tamil artists when tamil is in the query context
+  hindi: "songs",      // Same for Hindi
+  telugu: "songs",     // Telugu
+  malayalam: "songs",  // Malayalam
+  kannada: "songs",    // Kannada
+  english: "songs"     // English
 };
 
-// Reusable axios instance with optimizations
+// Reusable axios instance
 const apiClient = axios.create({
   timeout: 8000,
   headers: {
@@ -63,32 +63,6 @@ function cleanupCache() {
   }
 }
 
-// Filter artists by language (additional client-side filtering)
-function filterByLanguage(artists, targetLang) {
-  if (!targetLang || targetLang === "default") return artists;
-  
-  const langKeywords = {
-    tamil: ["tamil"],
-    hindi: ["hindi", "bollywood"],
-    telugu: ["telugu", "tollywood"],
-    malayalam: ["malayalam", "mollywood"],
-    kannada: ["kannada", "sandalwood"],
-    english: ["english", "international"]
-  };
-  
-  const keywords = langKeywords[targetLang.toLowerCase()] || [];
-  
-  return artists.filter(artist => {
-    const role = (artist.role || "").toLowerCase();
-    const name = (artist.name || "").toLowerCase();
-    
-    // Check if artist role or name contains target language keywords
-    return keywords.some(keyword => 
-      role.includes(keyword) || name.includes(keyword)
-    );
-  });
-}
-
 export default async function handler(req, res) {
   // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -109,35 +83,30 @@ export default async function handler(req, res) {
     let searchQuery;
     
     if (name) {
-      // Search by artist name
-      const langSuffix = lang && langMap[lang] ? ` ${langMap[lang]}` : "";
-      searchQuery = `${name}${langSuffix}`;
-    } else if (lang && langMap[lang]) {
-      // Search by language - use more specific query
-      searchQuery = `${langMap[lang]} artist songs music`;
+      // If artist name is provided, just search for the name
+      searchQuery = name;
+    } else if (lang && langSearchQueries[lang]) {
+      // For language-only searches, use a simple query that lets the API return language-specific results
+      // The API seems to understand language context from the query parameter
+      searchQuery = lang;
     } else {
       // Default fallback
-      searchQuery = "popular artist";
+      searchQuery = "artist";
     }
     
     const cacheKey = getCacheKey(searchQuery, lang || "default", page);
 
-    // Check cache
+    // Check cache first
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      let artists = cached.data.results || [];
-      
-      // Apply language filter
-      if (lang && !name) {
-        artists = filterByLanguage(artists, lang);
-      }
-      
+      const artists = cached.data.results || [];
       const filteredArtists = artists.map(({ name, role, image }) => ({
         name,
         role,
         image
       }));
 
+      // Trigger prefetch in background
       setImmediate(() => prefetchNextPage(searchQuery, lang || "default", page));
 
       return res.status(200).json({
@@ -145,7 +114,7 @@ export default async function handler(req, res) {
         perPage: 50,
         language: l || "default",
         searchQuery: name || searchQuery,
-        total: filteredArtists.length,
+        total: cached.data.total,
         artists: filteredArtists,
         cached: true
       });
@@ -159,28 +128,28 @@ export default async function handler(req, res) {
 
     const raw = await apiClient.get(url, { responseType: "text" });
     
+    // Optimized JSON parsing (remove prefix)
     const startIndex = raw.data.indexOf("{");
     const data = startIndex > 0 ? raw.data.slice(startIndex) : raw.data;
     const cleanJSON = JSON.parse(data);
 
+    // Cache the result
     cache.set(cacheKey, {
       data: cleanJSON,
       timestamp: Date.now()
     });
 
+    // Periodic cache cleanup
     if (Math.random() < 0.1) {
       setImmediate(cleanupCache);
     }
 
+    // Trigger predictive prefetch
     setImmediate(() => prefetchNextPage(searchQuery, lang || "default", page));
 
-    let artists = cleanJSON.results || [];
+    const artists = cleanJSON.results || [];
     
-    // Apply language filter when searching by language only
-    if (lang && !name) {
-      artists = filterByLanguage(artists, lang);
-    }
-    
+    // Optimized mapping with destructuring
     const filteredArtists = artists.map(({ name, role, image }) => ({
       name,
       role,
@@ -192,7 +161,7 @@ export default async function handler(req, res) {
       perPage: 50,
       language: l || "default",
       searchQuery: name || searchQuery,
-      total: filteredArtists.length,
+      total: cleanJSON.total,
       artists: filteredArtists,
       cached: false
     });
